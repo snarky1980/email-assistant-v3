@@ -708,7 +708,9 @@ function App() {
                                   : { valid: false, message: 'Nombre requis' }
                               
                               default:
-                                return { valid: true, message: 'OK' }
+                                return currentValue.trim() 
+                                  ? { valid: true, message: 'Valide' }
+                                  : { valid: false, message: 'Non valide' }
                             }
                           }
                           
