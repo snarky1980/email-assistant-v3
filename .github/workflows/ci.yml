@@ -17,13 +17,15 @@ jobs:
           node-version: 20
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
-      - name: Enable Corepack
-        run: corepack enable
+      - name: Prepare pnpm (Corepack)
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.4.1 --activate
+          pnpm -v
       - name: Show versions
         run: |
           node -v
           corepack -v || true
-          pnpm -v
       - name: Install deps (frozen lockfile)
         run: pnpm install --frozen-lockfile
       - name: Lint
