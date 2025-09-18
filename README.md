@@ -53,6 +53,11 @@ Une application React moderne pour la gestion et la génération de modèles de 
 3. **Éditez** directement le contenu final
 4. **Copiez** l'email vers votre client de messagerie
 
+### Liens utiles
+
+- Dév local: http://localhost:5174/email-assistant-v3/
+- GitHub Pages (après déploiement): https://snarky1980.github.io/email-assistant-v3/
+
 ## 🛠️ Technologies
 
 - **React** - Interface utilisateur
