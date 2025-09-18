@@ -11,6 +11,87 @@ import { Separator } from '@/components/ui/separator.jsx'
 import { ScrollArea } from '@/components/ui/scroll-area.jsx'
 import './App.css'
 
+// Helper to convert text with <<var>> into HTML spans with styles
+const buildHighlightedHtml = (text, variables, variablesMeta) => {
+  if (!text) return ''
+  const escapeHtml = (s) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+  const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const VARIABLE_COLORS = {
+    email: 'bg-blue-50 text-blue-700 border-blue-200',
+    phone: 'bg-green-50 text-green-700 border-green-200',
+    date: 'bg-purple-50 text-purple-700 border-purple-200',
+    number: 'bg-amber-50 text-amber-700 border-amber-200',
+    default: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    unknown: 'bg-gray-50 text-gray-600 border-gray-200'
+  }
+  const getVarClass = (name) => {
+    const info = variablesMeta?.[name]
+    return VARIABLE_COLORS[info?.type] || VARIABLE_COLORS.default
+  }
+  if (text.includes('<<')) {
+    return text
+      .split(/(<<[^>]+>>)/g)
+      .map(part => {
+        const m = part.match(/^<<([^>]+)>>$/)
+        if (!m) return escapeHtml(part)
+        const name = m[1]
+        const value = variables?.[name]
+        const isEmpty = !value || value.trim() === ''
+        const cls = `${getVarClass(name)} ${isEmpty ? 'border-dashed' : 'border-solid'}`
+        const shown = escapeHtml(isEmpty ? `<<${name}>>` : value)
+        return `<span class=\"inline px-1.5 py-0.5 rounded text-xs font-medium border ${cls}\">${shown}</span>`
+      })
+      .join('')
+  }
+  // No placeholders: highlight variable values inside the text
+  let escaped = escapeHtml(text)
+  // Sort variables by value length to avoid nested replacements
+  const entries = Object.entries(variables || {})
+    .filter(([, v]) => typeof v === 'string' && v.trim().length > 0)
+    .sort((a, b) => b[1].length - a[1].length)
+  for (const [name, value] of entries) {
+    const cls = `${getVarClass(name)} border-solid`
+    const escVal = escapeHtml(value)
+    const pattern = new RegExp(escapeRegExp(escVal), 'g')
+    escaped = escaped.replace(
+      pattern,
+      `<span class=\"inline px-1.5 py-0.5 rounded text-xs font-medium border ${cls}\">${escVal}</span>`
+    )
+  }
+  return escaped
+}
+
+// Overlay wrapper for editable highlight (textarea/input)
+const HighlightOverlay = ({ value, onChange, placeholder, className = '', variables, variablesMeta, as = 'textarea' }) => {
+  const highlighted = buildHighlightedHtml(value || '', variables, variablesMeta)
+  const overlayCommon = 'absolute inset-0 pointer-events-none whitespace-pre-wrap break-words px-3 py-2 text-inherit'
+  const sizerCommon = 'invisible whitespace-pre-wrap break-words px-3 py-2 text-inherit'
+  const InputTag = as
+  return (
+    <div className={`relative ${className}`}>
+      {/* Sizer: defines natural height based on content */}
+      <div className={sizerCommon} dangerouslySetInnerHTML={{ __html: highlighted || '&nbsp;' }}></div>
+      {/* Background */}
+      <div className="absolute inset-0 rounded bg-white" aria-hidden="true"></div>
+      {/* Highlight overlay */}
+      <div className={overlayCommon} dangerouslySetInnerHTML={{ __html: highlighted || '' }}></div>
+      {/* Actual input covering the area */}
+      <InputTag
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="absolute inset-0 bg-transparent caret-black outline-none w-full h-full resize-none px-3 py-2"
+        style={{ color: 'transparent', WebkitTextFillColor: 'transparent' }}
+      />
+    </div>
+  )
+}
+
 function App() {
   // Charger l'état sauvegardé
   const savedState = loadState()
@@ -240,91 +321,7 @@ function App() {
     return result
   }
 
-  /**
-   * 🎨 SURBRILLANCE DES VARIABLES DANS LE TEXTE
-   * 
-   * Convertit le texte avec variables en JSX avec surbrillance colorée
-   * - Variables remplies : fond vert clair
-   * - Variables vides : fond orange clair avec bordure
-   * - Couleurs distinctes pour faciliter l'identification
-   */
-  /**
-   * 🎨 FONCTION DE SURLIGNAGE DES VARIABLES - VERSION DISCRÈTE
-   * 
-   * Applique un surlignage doux et discret aux variables dans le texte
-   * Utilise des couleurs pastel pour une meilleure lisibilité
-   * 
-   * @param {string} text - Texte contenant des variables au format <<variable>>
-   * @returns {JSX.Element[]} - Tableau d'éléments React avec surlignage
-   */
-  const highlightVariables = (text) => {
-    if (!text) return text
-    
-    /**
-     * 🎨 PALETTE DE COULEURS DISCRÈTES
-     * Couleurs pastel pour un rendu professionnel et agréable
-     */
-    const VARIABLE_COLORS = {
-      email: 'bg-blue-50 text-blue-700 border-blue-200',      // Bleu doux pour emails
-      phone: 'bg-green-50 text-green-700 border-green-200',   // Vert doux pour téléphones
-      date: 'bg-purple-50 text-purple-700 border-purple-200', // Violet doux pour dates
-      number: 'bg-amber-50 text-amber-700 border-amber-200',  // Ambre doux pour nombres
-      default: 'bg-indigo-50 text-indigo-700 border-indigo-200', // Indigo par défaut
-      unknown: 'bg-gray-50 text-gray-600 border-gray-200'     // Gris pour variables inconnues
-    }
-    
-    /**
-     * 🎯 STYLES DE BASE POUR LE SURLIGNAGE
-     * Classes Tailwind pour un rendu discret et élégant
-     */
-    const BASE_HIGHLIGHT_CLASSES = 'inline px-1.5 py-0.5 rounded text-xs font-medium border transition-all duration-200'
-    
-    // Fonction pour obtenir la couleur selon le type de variable
-    const getVariableColor = (variableName) => {
-      const variableInfo = templatesData?.variables?.[variableName]
-      
-      if (!variableInfo) {
-        return VARIABLE_COLORS.unknown
-      }
-      
-      // Retourner la couleur selon le type, ou la couleur par défaut
-      return VARIABLE_COLORS[variableInfo.type] || VARIABLE_COLORS.default
-    }
-    
-    // Diviser le texte en parties pour identifier les variables (format <<variable>>)
-    const textParts = text.split(/(<<[^>]+>>)/g)
-    
-    return textParts.map((part, index) => {
-      // Vérifier si cette partie est une variable
-      const variableMatch = part.match(/^<<([^>]+)>>$/)
-      
-      if (variableMatch) {
-        const variableName = variableMatch[1]
-        const variableValue = variables[variableName]
-        const colorClasses = getVariableColor(variableName)
-        const isEmptyValue = !variableValue || variableValue.trim() === ''
-        
-        // Classes pour l'état vide (animation pulse + bordure pointillée)
-        const emptyStateClasses = isEmptyValue ? 'animate-pulse border-dashed' : 'border-solid'
-        
-        // Tooltip informatif
-        const tooltipText = `Variable: ${variableName}${isEmptyValue ? ' (vide)' : ` = ${variableValue}`}`
-        
-        return (
-          <span
-            key={index}
-            className={`${BASE_HIGHLIGHT_CLASSES} ${colorClasses} ${emptyStateClasses}`}
-            title={tooltipText}
-          >
-            {variableValue || `<<${variableName}>>`}
-          </span>
-        )
-      }
-      
-      // Retourner le texte normal sans modification
-      return part
-    })
-  }
+  // Note: inline highlighting is now handled by HighlightOverlay
 
   // Charger un modèle sélectionné
   useEffect(() => {
@@ -689,28 +686,29 @@ function App() {
                             if (isEmpty) return { valid: false, message: 'Requis' }
                             
                             switch (varInfo.type) {
-                              case 'email':
+                              case 'email': {
                                 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-                                return emailRegex.test(currentValue) 
+                                return emailRegex.test(currentValue)
                                   ? { valid: true, message: 'Valide' }
                                   : { valid: false, message: 'Format invalide' }
-                              
-                              case 'phone':
-                                const phoneRegex = /^[\d\s\-\+\(\)]{10,}$/
+                              }
+                              case 'phone': {
+                                const phoneRegex = /^[\d\s\-+()]{10,}$/
                                 return phoneRegex.test(currentValue)
                                   ? { valid: true, message: 'Valide' }
                                   : { valid: false, message: 'Format invalide' }
-                              
-                              case 'number':
+                              }
+                              case 'number': {
                                 const isNumber = !isNaN(parseFloat(currentValue))
                                 return isNumber
                                   ? { valid: true, message: 'Valide' }
                                   : { valid: false, message: 'Nombre requis' }
-                              
-                              default:
-                                return currentValue.trim() 
+                              }
+                              default: {
+                                return currentValue.trim()
                                   ? { valid: true, message: 'Valide' }
                                   : { valid: false, message: 'Non valide' }
+                              }
                             }
                           }
                           
@@ -796,31 +794,7 @@ function App() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-6 space-y-6">
-                    {/* Aperçu avec surbrillance des variables */}
-                    {selectedTemplate && (
-                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-200">
-                        <h4 className="text-sm font-bold text-blue-800 mb-3 flex items-center">
-                          <Sparkles className="h-4 w-4 mr-2" />
-                          Aperçu avec variables surlignées
-                        </h4>
-                        
-                        {/* Aperçu objet */}
-                        <div className="mb-4">
-                          <div className="text-xs font-semibold text-blue-700 mb-1">OBJET:</div>
-                          <div className="bg-white p-3 rounded border text-sm leading-relaxed">
-                            {highlightVariables(selectedTemplate.subject[templateLanguage] || '')}
-                          </div>
-                        </div>
-                        
-                        {/* Aperçu corps */}
-                        <div>
-                          <div className="text-xs font-semibold text-blue-700 mb-1">CORPS:</div>
-                          <div className="bg-white p-3 rounded border text-sm leading-relaxed max-h-32 overflow-y-auto">
-                            {highlightVariables(selectedTemplate.body[templateLanguage] || '')}
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    {/* Inline surbrillance directement dans les champs éditables */}
 
                     {/* Objet éditable - Version ultra-compacte */}
                     <div className="space-y-1">
@@ -828,11 +802,14 @@ function App() {
                         <span className="w-1 h-1 bg-green-500 rounded-full mr-1.5"></span>
                         {t.subject}
                       </label>
-                      <Textarea
+                      <HighlightOverlay
+                        as="textarea"
                         value={finalSubject}
                         onChange={(e) => setFinalSubject(e.target.value)}
-                        className="min-h-[28px] max-h-[28px] resize-none border border-green-300 focus:border-green-500 focus:ring-1 focus:ring-green-100 transition-all duration-300 text-sm py-1 px-2 leading-tight"
                         placeholder={t.subject}
+                        variables={variables}
+                        variablesMeta={templatesData?.variables}
+                        className="border border-green-300 focus-within:border-green-500 focus-within:ring-1 focus-within:ring-green-100 rounded"
                       />
                     </div>
 
@@ -842,11 +819,14 @@ function App() {
                         <span className="w-3 h-3 bg-green-500 rounded-full mr-2 animate-pulse"></span>
                         {t.body}
                       </label>
-                      <Textarea
+                      <HighlightOverlay
+                        as="textarea"
                         value={finalBody}
                         onChange={(e) => setFinalBody(e.target.value)}
-                        className="min-h-[250px] border-3 border-green-300 focus:border-green-500 focus:ring-4 focus:ring-green-100 transition-all duration-300 text-base leading-relaxed"
                         placeholder={t.body}
+                        variables={variables}
+                        variablesMeta={templatesData?.variables}
+                        className="min-h-[250px] border-2 border-green-300 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-100 rounded"
                       />
                     </div>
                   </CardContent>
